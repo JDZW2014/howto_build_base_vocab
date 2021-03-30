@@ -179,6 +179,7 @@ def constituent_evaluation(trees, results):
     # print('NP:', correct['NP']/total['NP'])
     # print('PP:', correct['PP']/total['PP'])
     # print('INTJ:', correct['INTJ']/total['INTJ'])
+    # print('INTJ:', correct['INTJ']/total['INTJ'])
     # print('average depth:', corpus_average_depth(corpus_sys))
     # return correct, total, corpus_average_depth(corpus_sys)
 

@@ -14,6 +14,7 @@ import numpy as np
 from transformers import BertModel, BertTokenizer
 from c_perturbed_masking.constituency.subword_script import match_tokenized_to_untokenized
 from c_perturbed_masking.constituency.decoder import mart, right_branching, left_branching
+import copy
 
 
 __all__ = []
@@ -46,27 +47,40 @@ def get_con_matrix(sentence_list, layers, metric, out_file, model, tokenizer, us
         # Convert token to vocabulary indices
         indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_text)
 
-        mapping = match_tokenized_to_untokenized(tokenized_text, sents)
+        mapping = match_tokenized_to_untokenized(tokenized_text, sents) # [-1, 0, 0, 0, 1, 1, 2, 3, 3, 3, 4, 5, 6, 6, 7, -1]
 
-        # 1. Generate mask indices
-        all_layers_matrix_as_list = [[] for i in range(LAYER)]
-        for i in range(0, len(tokenized_text)):
-            id_for_all_i_tokens = get_all_subword_id(mapping, i)
-            tmp_indexed_tokens = list(indexed_tokens)
-            for tmp_id in id_for_all_i_tokens:
-                if mapping[tmp_id] != -1:  # both CLS and SEP use -1 as id e.g., [-1, 0, 1, 2, ..., -1]
-                    tmp_indexed_tokens[tmp_id] = mask_id
-            one_batch = [list(tmp_indexed_tokens) for _ in range(0, len(tokenized_text))]
+        all_word_idx = set(mapping)
 
-            for j in range(0, len(tokenized_text)):
-                id_for_all_j_tokens = get_all_subword_id(mapping, j)
-                for tmp_id in id_for_all_j_tokens:
-                    if mapping[tmp_id] != -1:
-                        one_batch[j][tmp_id] = mask_id
+        all_word_idx.remove(-1)
+        all_word_idx = sorted(list(all_word_idx)) # [0, 1, 2, 3, 4, 5, 6, 7]
+
+        masked_indexed_tokens_list = []
+
+        # todo 改成可以输出13层结果的逻辑
+        init_matrix = np.zeros((len(all_word_idx), len(all_word_idx)))
+        for i, word_idx in enumerate(all_word_idx):
+
+            # 1. Generate mask indices
+            masked_indexed_tokens = copy.deepcopy(indexed_tokens)
+            for mapping_idx, mapping_value in enumerate(mapping):
+                if word_idx == mapping_value:
+                    masked_indexed_tokens[mapping_idx] = mask_id
+
+            masked_indexed_tokens_list.append(copy.deepcopy(masked_indexed_tokens))
+
+            for second_word_idx in all_word_idx:
+                if second_word_idx == word_idx:
+                    continue
+                masked_masked_indexed_tokens = copy.deepcopy(masked_indexed_tokens)
+                for mapping_idx, mapping_value in enumerate(mapping):
+                    if second_word_idx == mapping_value:
+                        masked_masked_indexed_tokens[mapping_idx] = mask_id
+                masked_indexed_tokens_list.append(masked_masked_indexed_tokens)
 
             # 2. Convert one batch to PyTorch tensors
-            tokens_tensor = torch.tensor(one_batch)
-            segments_tensor = torch.tensor([[0 for _ in one_sent] for one_sent in one_batch])
+            tokens_tensor = torch.tensor(masked_indexed_tokens_list)
+            segments_tensor = torch.tensor([[0 for _ in one_sent] for one_sent in masked_indexed_tokens_list])
+
             if use_cuda:
                 tokens_tensor = tokens_tensor.to('cuda')
                 segments_tensor = segments_tensor.to('cuda')
@@ -74,43 +88,14 @@ def get_con_matrix(sentence_list, layers, metric, out_file, model, tokenizer, us
 
             # 3. get all hidden states for one batch
             with torch.no_grad():
-                """
-                tokens_tensor = 
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,     4,     4,     4,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,     4,     4,     4,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,     4,     4,     4,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,     4,     4,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,     4,     4,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,     4,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,     4,     4,     4, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,     4,     4,     4, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,     4,     4,     4, 9479, 14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 4,    14787,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 9479,     4,  3230, 24306, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,     4,     4, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,     4,     4, 16791,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306,     4,     1],
-                    [    3,  8723,  4727,  1924,  3593,  1511,  1942,  2417, 29001,  1924, 9479, 14787,  3230, 24306, 16791,     1]
-                    
-                sjl 
-                batch_token_ids = 
-                    [    3, 99999,  4727,  1924,   123,   456,   789,     1],
-                    [    3, 99999, 99999,  1924,   123,   456,   789,     1],
-                    [    3,  8723, 99999,  1924,   123,   456,   789,     1],
-                    [    3,  8723, 99999, 99999,   123,   456,   789,     1],
-                    [    3,  8723,  4727, 99999,   123,   456,   789,     1],
-                    [    3,  8723,  4727, 99999, 99999,   456,   789,     1],
-                    [    3,  8723,  4727,  1924, 99999,   456,   789,     1],
-                    [    3,  8723,  4727,  1924, 99999, 99999,   789,     1],
-                    [    3,  8723,  4727,  1924,   123, 99999,   789,     1],
-                    [    3,  8723,  4727,  1924,   123, 99999, 99999,     1],
-                    [    3,  8723,  4727,  1924,   123,   456, 99999,     1]
-                """
                 model_outputs = model(tokens_tensor, segments_tensor)
                 all_layers = model_outputs[-1]  # 12 layers + embedding layer
 
             # 4. get hidden states for word_i in one batch
+            # todo 改成可以输出12层结果的逻辑
+            layer = all_layers[-1]
+
+            all_layers_matrix_as_list = []
             for k, layer in enumerate(all_layers):
                 # layer shape ->  torch.Size([16, 16, 768])
                 if use_cuda:

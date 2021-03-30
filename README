@@ -1,3 +1,3 @@
 a_seg_phrase from : https://github.com/shangjingbo1226/SegPhrase.git
 b_auto_phrase from : https://github.com/shangjingbo1226/AutoPhrase.git
-c_perturbed_masking : https://github.com/LividWo/Perturbed-Masking.git
+c_perturbed_masking : https://github.com/LividWo/Perturbed-Masking.git;https://github.com/bojone/perturbed_masking.git
